@@ -12,7 +12,7 @@ def main():
         print(f'Destination MAC: {dest_mac}, Source MAC: {src_mac}, Protocol: {eth_proto}')
 
         # IPv4
-        if eth_proto == 0x0800:
+        if eth_proto == 0x0800: #to be changed to 8 
             version, header_length, ttl, proto, src_ip, dest_ip, data = ipv4_packet(data)
             print(f'\n--- IPv4 Packet ---')
             print(f'Version: {version}, Header Length: {header_length}, TTL: {ttl}')
