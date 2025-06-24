@@ -59,14 +59,20 @@ def main():
             print(f"Source IP: {src_ip}, Destination IP: {dest_ip}")
 
             if proto == 6:  # TCP
-                src_port, dest_port, seq, ack, flags, payload = tcp_segment(data)
-                print(f">>> TCP Segment: {src_ip}:{src_port} -> {dest_ip}:{dest_port}")
-                print(f"Flags: {flags}")
-                print(format_multi_line("    ", payload))
+                result = tcp_segment(data)
+                if result[0] is not None:
+                    src_port, dest_port, seq, ack, flags, payload, options = result
+                    print(f">>> TCP Segment: {src_ip}:{src_port} -> {dest_ip}:{dest_port}")
+                    print(f"Flags: {flags}")
+                    if options:
+                        print("Options:")
+                        for opt in options:
+                            print(f"   {opt}")
+                    print(format_multi_line("    ", payload))
 
-                if detect_tcp_threat(src_port, dest_port, flags):
-                    print(f"[!] Possible TCP Threat Detected from {src_ip}:{src_port}")
-                    alert_packets.append(eth)
+                    if detect_tcp_threat(src_port, dest_port, flags):
+                        print(f"[!] Possible TCP Threat Detected from {src_ip}:{src_port}")
+                        alert_packets.append(eth)
 
             elif proto == 17:  # UDP
                 src_port, dest_port, length, payload = udp_segment(data)
@@ -139,8 +145,14 @@ def ipv4(addr):
     return '.'.join(map(str, addr))
 
 def tcp_segment(data):
-    src_port, dest_port, seq, ack, offset_reserved_flags = struct.unpack('! H H L L H', data[:14])
+    if len(data) < 20:
+        return None, None, None, None, {}, b'', []
+
+    src_port, dest_port, seq, ack, offset_reserved_flags, window, checksum, urg_ptr = struct.unpack('! H H L L H H H H', data[:20])
     offset = (offset_reserved_flags >> 12) * 4
+    if offset < 20 or len(data) < offset:
+        return None, None, None, None, {}, b'', []
+        
     flags = {
         'URG': (offset_reserved_flags & 32) >> 5,
         'ACK': (offset_reserved_flags & 16) >> 4,
@@ -149,7 +161,32 @@ def tcp_segment(data):
         'SYN': (offset_reserved_flags & 2) >> 1,
         'FIN': offset_reserved_flags & 1
     }
-    return src_port, dest_port, seq, ack, flags, data[offset:]
+    options = []
+    if offset > 20:
+        options_raw = data[20:offset]
+        i = 0
+        while i < len(options_raw):
+            kind = options_raw[i]
+            if kind == 0:
+                options.append({'Kind': 0, 'Name': 'EOL'})
+                break
+            elif kind == 1:
+                options.append({'Kind': 1, 'Name': 'NOP'})
+                i += 1
+            else:
+                if i + 1 >= len(options_raw):
+                    break
+                length = options_raw[i+1]
+                if i + length > len(options_raw) or length < 2:
+                    break
+                value = options_raw[i+2:i+length]
+                options.append({'Kind': kind, 'Length': length, 'Value': value.hex()})
+                i += length
+                continue
+            i += 1
+
+    payload = data[offset:]
+    return src_port, dest_port, seq, ack, flags, payload, options
 
 def udp_segment(data):
     src_port, dest_port, length = struct.unpack('! H H H 2x', data[:8])
